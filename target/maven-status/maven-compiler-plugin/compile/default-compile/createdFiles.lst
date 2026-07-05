@@ -1,0 +1,16 @@
+com/botmaker/shared/capture/linux/LinuxController.class
+com/botmaker/shared/capture/NativeControllerFactory.class
+com/botmaker/shared/capture/windows/GDI32.class
+com/botmaker/shared/capture/windows/Clicker.class
+com/botmaker/shared/capture/linux/X11$XWindowAttributes.class
+com/botmaker/shared/capture/windows/WindowsController.class
+com/botmaker/shared/capture/linux/XTest.class
+com/botmaker/shared/capture/linux/X11Utils.class
+com/botmaker/shared/capture/NativeController.class
+com/botmaker/shared/capture/windows/WindowInfo.class
+com/botmaker/shared/capture/GenericWindow.class
+com/botmaker/shared/capture/windows/WindowFinder.class
+com/botmaker/shared/capture/windows/User32$WNDENUMPROC.class
+com/botmaker/shared/capture/linux/X11.class
+com/botmaker/shared/capture/windows/User32.class
+com/botmaker/shared/capture/windows/WindowCapture.class

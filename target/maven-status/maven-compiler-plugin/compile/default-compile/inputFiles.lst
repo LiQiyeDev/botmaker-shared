@@ -1,0 +1,14 @@
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/linux/X11Utils.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/windows/User32.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/linux/XTest.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/windows/WindowFinder.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/linux/LinuxController.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/windows/WindowsController.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/windows/Clicker.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/linux/X11.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/NativeController.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/windows/WindowCapture.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/windows/GDI32.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/windows/WindowInfo.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/NativeControllerFactory.java
+/home/benjamingroisne/BotMakerProjects/botmaker/botmaker-shared/src/main/java/com/botmaker/shared/capture/GenericWindow.java
