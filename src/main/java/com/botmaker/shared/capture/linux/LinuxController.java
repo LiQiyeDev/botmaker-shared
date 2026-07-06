@@ -2,6 +2,10 @@ package com.botmaker.shared.capture.linux;
 
 import com.botmaker.shared.capture.GenericWindow;
 import com.botmaker.shared.capture.NativeController;
+import com.botmaker.shared.capture.linux.input.LinuxInputBackend;
+import com.botmaker.shared.capture.linux.input.UinputBackend;
+import com.botmaker.shared.capture.linux.input.XSendEventBackend;
+import com.botmaker.shared.capture.linux.input.XTestBackend;
 import com.sun.jna.Pointer;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
@@ -22,11 +26,23 @@ import java.util.List;
  * <p>{@link #captureWindow} returns {@code null} when it cannot produce a usable frame (X11
  * unavailable, invalid geometry, or a capture error — e.g. native Wayland where Robot returns black).
  * Callers apply their own full-desktop fallback.
+ *
+ * <p><b>Input synthesis</b> is delegated to a pluggable {@link LinuxInputBackend} chosen by the
+ * {@code botmaker.linux.input} system property (or {@code BOTMAKER_LINUX_INPUT} env var):
+ * <ul>
+ *   <li>{@code auto} (default) / {@code xsendevent} — {@link XSendEventBackend}: cursor-preserving,
+ *       background clicks to X11/XWayland windows. The real pointer is never moved.</li>
+ *   <li>{@code uinput} — {@link UinputBackend}: reliable everywhere (incl. native Wayland/games) but moves
+ *       the shared cursor; falls back to xsendevent if {@code /dev/uinput} can't be opened.</li>
+ *   <li>{@code xtest} — {@link XTestBackend}: the legacy warp-and-click (moves the cursor).</li>
+ * </ul>
+ * {@code auto} never selects a cursor-moving backend.
  */
 public class LinuxController implements NativeController, AutoCloseable {
 
 	private final Pointer display;
 	private final boolean x11Available;
+	private final LinuxInputBackend inputBackend;
 	private volatile boolean closed = false;
 
 	public LinuxController() {
@@ -51,6 +67,43 @@ public class LinuxController implements NativeController, AutoCloseable {
 
 		this.display = disp;
 		this.x11Available = available;
+		this.inputBackend = available ? selectBackend(disp) : null;
+	}
+
+	/** Pick the input backend from {@code botmaker.linux.input} (default {@code auto} → cursor-safe xsendevent). */
+	private static LinuxInputBackend selectBackend(Pointer display) {
+		String env = System.getenv("BOTMAKER_LINUX_INPUT");
+		String choice = System.getProperty("botmaker.linux.input", env != null ? env : "auto")
+			.trim().toLowerCase();
+
+		LinuxInputBackend backend;
+		switch (choice) {
+			case "xtest":
+				backend = new XTestBackend(display);
+				break;
+			case "uinput": {
+				int screen = X11.INSTANCE.XDefaultScreen(display);
+				int w = X11.INSTANCE.XDisplayWidth(display, screen);
+				int h = X11.INSTANCE.XDisplayHeight(display, screen);
+				UinputBackend u = UinputBackend.tryCreate(w, h, display);
+				if (u == null) {
+					System.err.println("[Linux] uinput unavailable (can't open /dev/uinput); "
+						+ "falling back to cursor-safe xsendevent.");
+					backend = new XSendEventBackend(display);
+				} else {
+					backend = u;
+				}
+				break;
+			}
+			case "auto":
+			case "xsendevent":
+			default:
+				backend = new XSendEventBackend(display);
+				break;
+		}
+		System.out.println("[Linux] input backend = " + backend.name()
+			+ " (preservesCursor=" + backend.preservesCursor() + ")");
+		return backend;
 	}
 
 	@Override
@@ -266,112 +319,32 @@ public class LinuxController implements NativeController, AutoCloseable {
 	}
 
 	/**
-	 * Post click using window-relative coordinates
-	 * Converts to screen coordinates and uses XTest
+	 * Post a left click at window-relative coordinates via the selected input backend. With the default
+	 * {@code xsendevent} backend this delivers the click straight to the window without moving the real
+	 * cursor, so it works in the background.
 	 */
 	@Override
 	public void postLeftClick(GenericWindow window, int relativeX, int relativeY) {
 		checkNotClosed();
-
-		if (!x11Available) {
-			System.out.println("[Linux] X11 not available, cannot post click.");
+		if (inputBackend == null || window == null) {
 			return;
 		}
-
-		try {
-			Pointer x11Window = (Pointer) window.getNativeHandle();
-
-			// Get window geometry to convert to screen coordinates
-			Rectangle rect = X11Utils.getWindowGeometry(display, x11Window);
-			if (rect == null) {
-				System.err.println("[Linux] Could not get window geometry for click.");
-				return;
-			}
-
-			// Convert to absolute screen coordinates
-			int screenX = rect.x + relativeX;
-			int screenY = rect.y + relativeY;
-
-			// Use XTest to simulate click
-			postLeftClickScreen(screenX, screenY);
-		} catch (Exception e) {
-			System.err.println("[Linux] Error posting click: " + e.getMessage());
-			e.printStackTrace();
-		}
+		inputBackend.clickWindow((Pointer) window.getNativeHandle(), relativeX, relativeY, 1);
 	}
 
 	/**
-	 * Post click using absolute screen coordinates
-	 * Uses XTest to avoid moving the visible cursor (like Windows PostMessage)
+	 * Post a left click at absolute screen coordinates via the selected input backend. The default
+	 * {@code xsendevent} backend resolves the window under the point and clicks it without touching the
+	 * real cursor; {@code uinput}/{@code xtest} move the shared cursor.
 	 */
 	@Override
 	public void postLeftClickScreen(int xAbs, int yAbs) {
 		checkNotClosed();
-
-		if (!x11Available) {
-			System.out.println("[Linux] X11 not available, attempting Robot click.");
-			try {
-				Robot robot = new Robot();
-				Point current = MouseInfo.getPointerInfo().getLocation();
-				robot.mouseMove(xAbs, yAbs);
-				Thread.sleep(10);
-				robot.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
-				robot.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
-				Thread.sleep(10);
-				robot.mouseMove(current.x, current.y);
-			} catch (Exception e) {
-				System.err.println("[Linux] Robot click failed: " + e.getMessage());
-			}
+		if (inputBackend == null) {
+			System.out.println("[Linux] X11 not available, cannot post click.");
 			return;
 		}
-
-		try {
-			// XTestFakeMotionEvent warps the real cursor, so remember where it was to restore it after.
-			// Restore is X11-only: under native Wayland we run as an XWayland client that can *write*
-			// the pointer (warp/click) but cannot *read* the global cursor position (XQueryPointer
-			// returns a stale constant when the cursor isn't over our surface — and the bot has none).
-			// So on Wayland we skip the restore (cursor stays on target) rather than teleport it to a
-			// bogus fixed spot. The Wayland-correct path (RemoteDesktop portal / libei) is roadmapped.
-			boolean canRestore = System.getenv("WAYLAND_DISPLAY") == null;
-			IntByReference rootX = new IntByReference();
-			IntByReference rootY = new IntByReference();
-			boolean haveCurrent = false;
-			if (canRestore) {
-				Pointer root = X11.INSTANCE.XDefaultRootWindow(display);
-				haveCurrent = X11.INSTANCE.XQueryPointer(display, root,
-						new PointerByReference(), new PointerByReference(),
-						rootX, rootY, new IntByReference(), new IntByReference(), new IntByReference());
-			}
-
-			// Move pointer to the click position (this moves the visible cursor)
-			XTest.INSTANCE.XTestFakeMotionEvent(display, -1, xAbs, yAbs, 0);
-			X11.INSTANCE.XFlush(display);
-
-			// Small delay to ensure motion is processed
-			Thread.sleep(10);
-
-			// Press left button
-			XTest.INSTANCE.XTestFakeButtonEvent(display, XTest.Button1, true, 0);
-			X11.INSTANCE.XFlush(display);
-
-			// Small delay between press and release
-			Thread.sleep(10);
-
-			// Release left button
-			XTest.INSTANCE.XTestFakeButtonEvent(display, XTest.Button1, false, 0);
-			X11.INSTANCE.XFlush(display);
-
-			// Restore the pointer to where the user left it, minimizing the visible flicker
-			if (haveCurrent) {
-				XTest.INSTANCE.XTestFakeMotionEvent(display, -1, rootX.getValue(), rootY.getValue(), 0);
-				X11.INSTANCE.XFlush(display);
-			}
-
-			System.out.println("[Linux] Click sent to (" + xAbs + ", " + yAbs + ")");
-		} catch (Exception e) {
-			System.err.println("[Linux] Error posting screen click: " + e.getMessage());
-			e.printStackTrace();
-		}
+		inputBackend.clickScreen(xAbs, yAbs, 1);
 	}
 
 	@Override
@@ -418,42 +391,30 @@ public class LinuxController implements NativeController, AutoCloseable {
 		}
 	}
 
-	// --- Input synthesis ---
+	// --- Input synthesis (delegated to the selected LinuxInputBackend) ---
 
-	private static final long KEYSYM_SHIFT_L = 0xFFE1L;
+	private static final int KEYSYM_SHIFT_L = 0xFFE1;
 
 	@Override
 	public void keyDown(int nativeKeyCode) {
-		fakeKey(nativeKeyCode, true);
+		checkNotClosed();
+		if (inputBackend != null) {
+			inputBackend.key(nativeKeyCode, true);
+		}
 	}
 
 	@Override
 	public void keyUp(int nativeKeyCode) {
-		fakeKey(nativeKeyCode, false);
-	}
-
-	/** nativeKeyCode is an X keysym; resolve it to a physical keycode for XTest. */
-	private void fakeKey(int keysym, boolean press) {
 		checkNotClosed();
-		if (!x11Available) {
-			return;
-		}
-		try {
-			int keycode = X11.INSTANCE.XKeysymToKeycode(display, keysym) & 0xFF;
-			if (keycode == 0) {
-				return;
-			}
-			XTest.INSTANCE.XTestFakeKeyEvent(display, keycode, press, 0);
-			X11.INSTANCE.XFlush(display);
-		} catch (Exception e) {
-			System.err.println("[Linux] Error posting key event: " + e.getMessage());
+		if (inputBackend != null) {
+			inputBackend.key(nativeKeyCode, false);
 		}
 	}
 
 	@Override
 	public void typeText(String text) {
 		checkNotClosed();
-		if (!x11Available || text == null) {
+		if (inputBackend == null || text == null) {
 			return;
 		}
 		for (int i = 0; i < text.length(); i++) {
@@ -461,12 +422,12 @@ public class LinuxController implements NativeController, AutoCloseable {
 			// For Latin-1 the X keysym equals the code point; uppercase letters need Shift held.
 			boolean needShift = Character.isUpperCase(c);
 			if (needShift) {
-				fakeKey((int) KEYSYM_SHIFT_L, true);
+				inputBackend.key(KEYSYM_SHIFT_L, true);
 			}
-			fakeKey(c, true);
-			fakeKey(c, false);
+			inputBackend.key(c, true);
+			inputBackend.key(c, false);
 			if (needShift) {
-				fakeKey((int) KEYSYM_SHIFT_L, false);
+				inputBackend.key(KEYSYM_SHIFT_L, false);
 			}
 		}
 	}
@@ -474,47 +435,24 @@ public class LinuxController implements NativeController, AutoCloseable {
 	@Override
 	public void mouseMove(int xAbs, int yAbs) {
 		checkNotClosed();
-		if (!x11Available) {
-			return;
-		}
-		try {
-			XTest.INSTANCE.XTestFakeMotionEvent(display, -1, xAbs, yAbs, 0);
-			X11.INSTANCE.XFlush(display);
-		} catch (Exception e) {
-			System.err.println("[Linux] Error moving mouse: " + e.getMessage());
+		if (inputBackend != null) {
+			inputBackend.move(xAbs, yAbs);
 		}
 	}
 
 	@Override
 	public void mouseButton(int button, boolean press) {
 		checkNotClosed();
-		if (!x11Available) {
-			return;
-		}
-		try {
-			XTest.INSTANCE.XTestFakeButtonEvent(display, button, press, 0);
-			X11.INSTANCE.XFlush(display);
-		} catch (Exception e) {
-			System.err.println("[Linux] Error posting mouse button: " + e.getMessage());
+		if (inputBackend != null) {
+			inputBackend.button(button, press);
 		}
 	}
 
 	@Override
 	public void scroll(int amount) {
 		checkNotClosed();
-		if (!x11Available || amount == 0) {
-			return;
-		}
-		int button = amount > 0 ? XTest.Button4 : XTest.Button5; // 4 = up/away, 5 = down/toward
-		int ticks = Math.abs(amount);
-		try {
-			for (int i = 0; i < ticks; i++) {
-				XTest.INSTANCE.XTestFakeButtonEvent(display, button, true, 0);
-				XTest.INSTANCE.XTestFakeButtonEvent(display, button, false, 0);
-			}
-			X11.INSTANCE.XFlush(display);
-		} catch (Exception e) {
-			System.err.println("[Linux] Error scrolling: " + e.getMessage());
+		if (inputBackend != null) {
+			inputBackend.scroll(amount);
 		}
 	}
 
@@ -551,6 +489,13 @@ public class LinuxController implements NativeController, AutoCloseable {
 			synchronized (this) {
 				if (!closed) {
 					try {
+						if (inputBackend != null) {
+							inputBackend.close(); // destroy the uinput device, if any
+						}
+					} catch (Exception e) {
+						System.err.println("[Linux] Error closing input backend: " + e.getMessage());
+					}
+					try {
 						X11.INSTANCE.XCloseDisplay(display);
 					} catch (Exception e) {
 						System.err.println("[Linux] Error closing X11 display: " + e.getMessage());
@@ -560,6 +505,12 @@ public class LinuxController implements NativeController, AutoCloseable {
 				}
 			}
 		}
+	}
+
+	/** True if the active input backend leaves the user's real cursor untouched (background-capable). */
+	@Override
+	public boolean supportsBackgroundInput() {
+		return inputBackend != null && inputBackend.preservesCursor();
 	}
 
 	/**

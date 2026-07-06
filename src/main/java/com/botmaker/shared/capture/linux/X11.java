@@ -30,6 +30,23 @@ public interface X11 extends Library {
 	int IsUnviewable = 1;
 	int IsViewable = 2;
 
+	// Event types (X.h)
+	int KeyPress = 2;
+	int KeyRelease = 3;
+	int ButtonPress = 4;
+	int ButtonRelease = 5;
+	int MotionNotify = 6;
+
+	// Event mask bits (X.h) — used as the XSendEvent event_mask so the event is delivered
+	// to the window's owning client even when we target a specific window.
+	long KeyPressMask = 1L << 0;
+	long KeyReleaseMask = 1L << 1;
+	long ButtonPressMask = 1L << 2;
+	long ButtonReleaseMask = 1L << 3;
+	long PointerMotionMask = 1L << 6;
+
+	long CurrentTime = 0L;
+
 	// Display management
 	Pointer XOpenDisplay(String displayName);
 	int XCloseDisplay(Pointer display);
@@ -81,6 +98,12 @@ public interface X11 extends Library {
 	int XGetInputFocus(Pointer display, PointerByReference focusReturn, IntByReference revertToReturn);
 	int XSetInputFocus(Pointer display, Pointer focus, int revertTo, long time);
 
+	// Synthetic event delivery. Sends {@code event} to {@code window}'s owning client without moving the
+	// real pointer (unlike XTest). {@code propagate}=false + a matching {@code eventMask} delivers the
+	// event to the client even if it hasn't selected for it. Returns 0 on failure (BadWindow/BadValue).
+	int XSendEvent(Pointer display, Pointer window, boolean propagate, com.sun.jna.NativeLong eventMask,
+				   XButtonEvent event);
+
 	// Window geometry mutation (move / resize)
 	int XMoveWindow(Pointer display, Pointer window, int x, int y);
 	int XResizeWindow(Pointer display, Pointer window, int width, int height);
@@ -104,6 +127,40 @@ public interface X11 extends Library {
 
 	// Utility
 	int XFetchName(Pointer display, Pointer window, PointerByReference nameReturn);
+
+	/**
+	 * XButtonEvent / XKeyEvent — same native layout in Xlib.h (the trailing {@code button} field doubles as
+	 * {@code keycode} for KeyPress/KeyRelease). Passed to {@link #XSendEvent} to deliver synthetic pointer or
+	 * key input to a specific window without touching the real cursor.
+	 *
+	 * <p>The native {@code XEvent} is a union sized to its largest member (192 bytes on 64-bit). {@code
+	 * XSendEvent} reads {@code sizeof(XEvent)} bytes from the pointer, so this struct is padded past that size
+	 * with {@link #pad} to guarantee the read stays inside our buffer. Fields follow the Xlib.h order; JNA
+	 * applies the natural C alignment (e.g. {@code serial}/{@code display} align to 8 on 64-bit).
+	 */
+	class XButtonEvent extends Structure {
+		public int type;                       // ButtonPress/ButtonRelease/KeyPress/KeyRelease/MotionNotify
+		public com.sun.jna.NativeLong serial;  // unsigned long — # of last request processed by server
+		public int send_event;                 // Bool — set true by the server for XSendEvent'd events
+		public Pointer display;                // Display* the event was read from
+		public com.sun.jna.NativeLong window;  // Window the event is reported relative to (XID)
+		public com.sun.jna.NativeLong root;    // root window that the event occurred on
+		public com.sun.jna.NativeLong subwindow;
+		public com.sun.jna.NativeLong time;    // Time — milliseconds
+		public int x, y;                       // pointer position, window-relative
+		public int x_root, y_root;             // pointer position, root-relative (screen)
+		public int state;                      // key/button mask
+		public int button;                     // button (1..5) — or keycode for KeyPress/KeyRelease
+		public int same_screen;                // Bool
+		// Pad past sizeof(XEvent) (192B on 64-bit) so XSendEvent never reads past our buffer.
+		public byte[] pad = new byte[128];
+
+		@Override
+		protected List<String> getFieldOrder() {
+			return Arrays.asList("type", "serial", "send_event", "display", "window", "root", "subwindow",
+				"time", "x", "y", "x_root", "y_root", "state", "button", "same_screen", "pad");
+		}
+	}
 
 	/**
 	 * XWindowAttributes structure

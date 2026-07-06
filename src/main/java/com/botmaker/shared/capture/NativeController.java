@@ -22,6 +22,15 @@ public interface NativeController {
 	void postLeftClick(GenericWindow window, int relativeX, int relativeY);
 	void postLeftClickScreen(int xAbs, int yAbs);
 
+	/**
+	 * True if input synthesis leaves the user's real cursor untouched and can drive an unfocused/background
+	 * window. On Linux this reflects the selected input backend (cursor-preserving XSendEvent vs.
+	 * cursor-moving uinput/XTest); the default {@code false} keeps this additive for existing implementations.
+	 */
+	default boolean supportsBackgroundInput() {
+		return false;
+	}
+
 	// --- Window management ---
 	void focusWindow(GenericWindow window);
 	void moveWindow(GenericWindow window, int x, int y);

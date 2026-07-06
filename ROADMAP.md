@@ -8,6 +8,37 @@ Format: newest first. Each dated entry has a **Done** list and, when relevant, *
 
 ---
 
+## 2026-07-06 — Cursor-preserving background input (pluggable Linux backends)
+
+**Done**
+- **Replaced the single XTest click path with a pluggable `LinuxInputBackend`** (`capture/linux/input/`),
+  selected by the `botmaker.linux.input` system property / `BOTMAKER_LINUX_INPUT` env var
+  (`auto` → xsendevent | `xsendevent` | `uinput` | `xtest`). `auto` never picks a cursor-moving backend.
+  `LinuxController` now delegates all input synthesis (`postLeftClick*`, `mouseMove`, `mouseButton`,
+  `keyDown/keyUp`, `typeText`, `scroll`) to the chosen backend and destroys it in `close()`.
+- **`XSendEventBackend` (new default) — cursor-preserving background clicking.** Delivers synthetic
+  `ButtonPress`/`ButtonRelease`/`MotionNotify`/`Key*` straight to the target window via new `X11.XSendEvent`
+  + an `XButtonEvent`/`XEvent` JNA struct (padded past `sizeof(XEvent)`); drills to the leaf child under the
+  point with `XTranslateCoordinates`. The real cursor never moves and the target need not be focused/on top.
+  Reaches X11/XWayland windows — exactly the set this module enumerates/captures. **Verified on KDE Wayland:**
+  clicks land on a Swing target while the real cursor stays put.
+- **`UinputBackend` — reliable-everywhere opt-in, pure Java** (JNA to `/dev/uinput`, no `ydotool`/`dotool`).
+  Absolute virtual pointer + keyboard; the key fix for KWin/GNOME was `UI_SET_PROPBIT INPUT_PROP_POINTER`
+  (without it the ABS axes are ignored) plus a tight key-capability set. **Verified:** clicks land precisely
+  (cursor warps to the exact target) incl. apps XSendEvent can't reach. Moves the shared cursor (documented);
+  falls back to xsendevent if `/dev/uinput` can't be opened. Includes an X-keysym → evdev `KEY_*` table.
+- **`XTestBackend`** — the legacy warp-and-click, extracted verbatim, now opt-in only.
+- **Additive `NativeController.supportsBackgroundInput()`** (default `false`) reports whether the active
+  backend leaves the cursor untouched — non-breaking for the SDK/Studio.
+
+**Deferred / next**
+- **Reliable *and* cursor-safe on native Wayland** — impossible in-process (one seat, no per-window
+  injection). Needs either the RemoteDesktop portal + libei (still moves the cursor, one-time permission
+  dialog) or running the target inside a bot-owned nested/headless compositor (Xephyr/gamescope) — a
+  consumer-level (SDK/Studio) architecture change, not a shared change.
+- **uinput multi-monitor** — the absolute device maps across a single output; clicks on secondary monitors
+  may need per-output coordinate handling.
+
 ## 2026-07-06 — Extracted into a standalone shared module
 
 **Done**
