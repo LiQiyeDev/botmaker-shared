@@ -8,6 +8,16 @@ Format: newest first. Each dated entry has a **Done** list and, when relevant, *
 
 ---
 
+## 2026-07-08 — Telemetry wire v2: per-event source line
+
+**Done**
+- `TelemetryEvent.Match/Click/Region` gained an `int line()` (1-based bot source line that triggered the
+  event, `-1` when unknown), with a line-less convenience constructor so existing call sites are unchanged.
+- `TelemetryFrame` bumped `PROTOCOL_VERSION` to 2 and writes/reads the trailing `line` for each type. The
+  version guard means a v1 emitter (an old released SDK) and a v2 reader (the new Studio) reject each other's
+  frames rather than misreading — local dev must run the local-SNAPSHOT SDK. Lets the Studio highlight the
+  running block live during a plain run (see `../botmaker-sdk` `IpcObserver.botLine()` and the Studio ROADMAP).
+
 ## 2026-07-07 — Telemetry IPC channel (`com.botmaker.shared.ipc`)
 
 **Done**

@@ -21,15 +21,36 @@ public sealed interface TelemetryEvent
     Target target();
 
     /**
+     * The 1-based line in the bot's source that triggered this event, or {@code -1} when unknown. Lets the
+     * Studio highlight the running block live during a plain run (debug/trace already highlights via JDI).
+     */
+    int line();
+
+    /**
      * A template match attempt. {@code rect} is the matched bounds (null when {@code !found});
      * {@code region} is the search sub-rectangle (null for a whole-surface search).
      */
-    record Match(Target target, Rect region, Rect rect, double confidence, boolean found)
-            implements TelemetryEvent {}
+    record Match(Target target, Rect region, Rect rect, double confidence, boolean found, int line)
+            implements TelemetryEvent {
+        /** Line-less convenience (line = {@code -1}). */
+        public Match(Target target, Rect region, Rect rect, double confidence, boolean found) {
+            this(target, region, rect, confidence, found, -1);
+        }
+    }
 
     /** A click landing at ({@code x},{@code y}) absolute. {@code button}: 1=left, 2=middle, 3=right. */
-    record Click(Target target, int x, int y, int button) implements TelemetryEvent {}
+    record Click(Target target, int x, int y, int button, int line) implements TelemetryEvent {
+        /** Line-less convenience (line = {@code -1}). */
+        public Click(Target target, int x, int y, int button) {
+            this(target, x, y, button, -1);
+        }
+    }
 
     /** A standalone search-region highlight (a search scoped to a sub-rectangle of the surface). */
-    record Region(Target target, Rect rect) implements TelemetryEvent {}
+    record Region(Target target, Rect rect, int line) implements TelemetryEvent {
+        /** Line-less convenience (line = {@code -1}). */
+        public Region(Target target, Rect rect) {
+            this(target, rect, -1);
+        }
+    }
 }

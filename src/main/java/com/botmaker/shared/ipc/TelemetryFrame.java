@@ -23,8 +23,8 @@ import java.io.IOException;
  */
 public final class TelemetryFrame {
 
-    /** Bumped when the on-wire encoding changes incompatibly. */
-    public static final int PROTOCOL_VERSION = 1;
+    /** Bumped when the on-wire encoding changes incompatibly. v2 added a trailing {@code line} per event. */
+    public static final int PROTOCOL_VERSION = 2;
 
     /** Guards a decoder against absurd length prefixes (a stray/misaligned stream). */
     static final int MAX_FRAME_BYTES = 1 << 20;
@@ -48,6 +48,7 @@ public final class TelemetryFrame {
                 writeNullableRect(p, m.rect());
                 p.writeDouble(m.confidence());
                 p.writeBoolean(m.found());
+                p.writeInt(m.line());
             }
             case TelemetryEvent.Click c -> {
                 p.writeByte(TYPE_CLICK);
@@ -55,11 +56,13 @@ public final class TelemetryFrame {
                 p.writeInt(c.x());
                 p.writeInt(c.y());
                 p.writeInt(c.button());
+                p.writeInt(c.line());
             }
             case TelemetryEvent.Region r -> {
                 p.writeByte(TYPE_REGION);
                 writeTarget(p, r.target());
                 writeNullableRect(p, r.rect());
+                p.writeInt(r.line());
             }
         }
         byte[] payload = buffer.toByteArray();
@@ -85,11 +88,11 @@ public final class TelemetryFrame {
         int type = p.readUnsignedByte();
         return switch (type) {
             case TYPE_MATCH -> new TelemetryEvent.Match(
-                    readTarget(p), readNullableRect(p), readNullableRect(p), p.readDouble(), p.readBoolean());
+                    readTarget(p), readNullableRect(p), readNullableRect(p), p.readDouble(), p.readBoolean(), p.readInt());
             case TYPE_CLICK -> new TelemetryEvent.Click(
-                    readTarget(p), p.readInt(), p.readInt(), p.readInt());
+                    readTarget(p), p.readInt(), p.readInt(), p.readInt(), p.readInt());
             case TYPE_REGION -> new TelemetryEvent.Region(
-                    readTarget(p), readNullableRect(p));
+                    readTarget(p), readNullableRect(p), p.readInt());
             default -> throw new IOException("Unknown telemetry type tag: " + type);
         };
     }
