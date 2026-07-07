@@ -8,6 +8,27 @@ Format: newest first. Each dated entry has a **Done** list and, when relevant, *
 
 ---
 
+## 2026-07-07 — Telemetry IPC channel (`com.botmaker.shared.ipc`)
+
+**Done**
+- New dependency-free (JNA-only, no JSON) loopback telemetry protocol shared by the SDK (emitter) and
+  Studio (consumer), for the Studio's live window-preview overlays. Geometry-only — no image bytes cross
+  the socket; the Studio captures the frame itself.
+- `TelemetryEvent` — sealed record hierarchy (`Match`/`Click`/`Region`) with a `Target` (window title +
+  bounds, or a screen) and `Rect`s. `TelemetryFrame` — length-prefixed binary framing (int32 length +
+  1-byte protocol version + 1-byte type tag + field-by-field encode/decode via `DataInput/OutputStream`).
+- `TelemetryServer` (Studio side): binds an ephemeral 127.0.0.1 port before launch, accepts one connection
+  per run, validates a handshake token, decodes frames to a callback. `TelemetryClient` (bot side):
+  best-effort/non-blocking — bounded queue + single writer thread, drops on overflow, disables on IOException.
+  `TelemetryClient.fromEnvironment()` returns null when `BM_IPC_PORT` is unset (zero overhead outside Studio).
+- Constants in `IpcEnv` (`BM_IPC_PORT`/`BM_IPC_TOKEN`). First tests in this module: `TelemetryFrameTest`
+  (round-trip) + `TelemetryChannelTest` (loopback, token reject, overflow non-block). Added JUnit Jupiter
+  5.10.2 + Surefire 3.2.5 to the pom.
+
+**Deferred / next**
+- Consumed by SDK `api/observe` bridge + Studio preview panel (separate modules). Migrating `BM-INPUT` off
+  stdout onto this channel is possible later but out of scope.
+
 ## 2026-07-06 — Cursor-preserving background input (pluggable Linux backends)
 
 **Done**
