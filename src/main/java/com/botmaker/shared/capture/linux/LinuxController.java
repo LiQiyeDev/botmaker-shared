@@ -17,7 +17,7 @@ import java.util.List;
 
 /**
  * Linux implementation of NativeController using X11
- * Uses Robot for window capture and XTest for mouse clicks
+ * Uses XGetImage for window capture (portal/prompt-free on X11/XWayland) and XTest for mouse clicks
  *
  * Note: This class manages native X11 resources. While it implements AutoCloseable,
  * the display connection is typically kept open for the lifetime of the application.
@@ -287,8 +287,11 @@ public class LinuxController implements NativeController, AutoCloseable {
 	}
 
 	/**
-	 * Capture window using Robot (simple and reliable on X11). Returns {@code null} on failure so the
-	 * caller can apply its own full-desktop fallback (e.g. the Wayland CLI grab).
+	 * Capture a window by reading its X pixmap directly with {@link X11#XGetImage} against the window drawable.
+	 * This is deliberately <b>not</b> AWT {@code Robot}: on Wayland every {@code Robot} grab tunnels through
+	 * xdg-desktop-portal and pops a screen-share prompt (and then fails with a {@code SecurityException}),
+	 * whereas {@code XGetImage} on an X11/XWayland window reads its pixels with no portal and no prompt.
+	 * Returns {@code null} on failure so the caller can apply its own full-desktop fallback.
 	 */
 	@Override
 	public BufferedImage captureWindow(GenericWindow window) {
@@ -298,24 +301,70 @@ public class LinuxController implements NativeController, AutoCloseable {
 			return null;
 		}
 
+		X11.XImage image = null;
 		try {
 			Pointer x11Window = (Pointer) window.getNativeHandle();
 
-			// Get window geometry
+			// Geometry gives us the window's size; XGetImage reads from the window's own (0,0) origin.
 			Rectangle rect = X11Utils.getWindowGeometry(display, x11Window);
 			if (rect == null || rect.width <= 0 || rect.height <= 0) {
 				System.err.println("[Linux] Invalid window geometry, cannot capture window.");
 				return null;
 			}
 
-			// Simple and reliable - use Robot for screen capture
-			return new Robot().createScreenCapture(rect);
+			image = X11.INSTANCE.XGetImage(display, x11Window, 0, 0, rect.width, rect.height,
+					new com.sun.jna.NativeLong(X11.AllPlanes), X11.ZPixmap);
+			if (image == null || image.data == null || image.bits_per_pixel < 24) {
+				return null;
+			}
+			return toBufferedImage(image);
 
-		} catch (Exception e) {
+		} catch (Throwable e) {
 			System.err.println("[Linux] Error capturing window: " + e.getMessage());
-			e.printStackTrace();
 			return null;
+		} finally {
+			if (image != null) image.destroyImage();
 		}
+	}
+
+	/**
+	 * Decodes a ZPixmap {@link X11.XImage} into a {@code TYPE_INT_ARGB} image, extracting channels via the
+	 * image's {@code red/green/blue} masks (handles both 32- and 24-bit-per-pixel packings). Assumes the
+	 * server's byte order matches the JVM (true for a local X/XWayland connection).
+	 */
+	private static BufferedImage toBufferedImage(X11.XImage image) {
+		int w = image.width, h = image.height;
+		if (w <= 0 || h <= 0) return null;
+
+		int bpp = image.bits_per_pixel;
+		int stride = image.bytes_per_line;
+		int bytesPerPixel = bpp / 8;
+		byte[] raw = image.data.getByteArray(0, stride * h);
+
+		int redMask = (int) image.red_mask.longValue();
+		int greenMask = (int) image.green_mask.longValue();
+		int blueMask = (int) image.blue_mask.longValue();
+		int redShift = Integer.numberOfTrailingZeros(redMask == 0 ? 0xFF0000 : redMask);
+		int greenShift = Integer.numberOfTrailingZeros(greenMask == 0 ? 0x00FF00 : greenMask);
+		int blueShift = Integer.numberOfTrailingZeros(blueMask == 0 ? 0x0000FF : blueMask);
+
+		BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+		int[] px = ((java.awt.image.DataBufferInt) out.getRaster().getDataBuffer()).getData();
+		for (int y = 0; y < h; y++) {
+			int rowStart = y * stride;
+			int outRow = y * w;
+			for (int x = 0; x < w; x++) {
+				int p = rowStart + x * bytesPerPixel;
+				// Little-endian assembly of the pixel value from its bytes.
+				int pixel = (raw[p] & 0xFF) | ((raw[p + 1] & 0xFF) << 8) | ((raw[p + 2] & 0xFF) << 16);
+				if (bytesPerPixel >= 4) pixel |= (raw[p + 3] & 0xFF) << 24;
+				int r = (pixel & redMask) >>> redShift;
+				int g = (pixel & greenMask) >>> greenShift;
+				int b = (pixel & blueMask) >>> blueShift;
+				px[outRow + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
+			}
+		}
+		return out;
 	}
 
 	/**

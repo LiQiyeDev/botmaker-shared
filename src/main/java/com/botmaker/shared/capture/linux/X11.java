@@ -14,7 +14,10 @@ import java.util.List;
  * JNA bindings for X11 library (libX11)
  * Used for window management and querying on Linux
  *
- * Note: XImage-related bindings removed since we use Robot for screen capture
+ * <p>Includes {@link #XGetImage} (+ the {@link XImage} struct) so window capture can read a window's pixmap
+ * directly. Unlike AWT {@code Robot} — which on Wayland tunnels through xdg-desktop-portal and triggers a
+ * screen-share prompt per grab — {@code XGetImage} against an X11/XWayland window drawable reads its pixels
+ * with no portal and no prompt.
  */
 public interface X11 extends Library {
 	X11 INSTANCE = Native.load("X11", X11.class);
@@ -25,6 +28,12 @@ public interface X11 extends Library {
 	int Success = 0;
 	int InputFocus = 1;
 	int RevertToParent = 2;
+
+	// XGetImage: image formats (Xlib.h) and the "all planes" mask.
+	int XYBitmap = 0;
+	int XYPixmap = 1;
+	int ZPixmap = 2;
+	long AllPlanes = 0xFFFFFFFFFFFFFFFFL;
 
 	int IsUnmapped = 0;
 	int IsUnviewable = 1;
@@ -122,6 +131,11 @@ public interface X11 extends Library {
 	int XDisplayWidth(Pointer display, int screenNumber);
 	int XDisplayHeight(Pointer display, int screenNumber);
 
+	// Image capture — reads a drawable's pixels directly (no portal/prompt on X11/XWayland). Returns a
+	// pointer to a heap XImage; free it via the struct's f.destroy_image function pointer (see LinuxController).
+	XImage XGetImage(Pointer display, Pointer drawable, int x, int y, int width, int height,
+					 com.sun.jna.NativeLong planeMask, int format);
+
 	// Memory management
 	int XFree(Pointer data);
 
@@ -159,6 +173,61 @@ public interface X11 extends Library {
 		protected List<String> getFieldOrder() {
 			return Arrays.asList("type", "serial", "send_event", "display", "window", "root", "subwindow",
 				"time", "x", "y", "x_root", "y_root", "state", "button", "same_screen", "pad");
+		}
+	}
+
+	/**
+	 * XImage — the pixel buffer returned by {@link #XGetImage} (Xlib.h layout). Fields run through the RGB
+	 * channel masks (enough to decode a ZPixmap), then {@code obdata} and the six image-manipulation function
+	 * pointers; the function table is flattened here so (a) the struct is sized correctly for the buffer the
+	 * server allocated and (b) {@link #destroyImage} can be called to free it (that is what the Xlib
+	 * {@code XDestroyImage} macro expands to — there is no plain library symbol).
+	 *
+	 * <p>{@code data} points at {@code bytes_per_line * height} bytes; a ZPixmap pixel is {@code bits_per_pixel}
+	 * bits and its channels are extracted with {@code red_mask}/{@code green_mask}/{@code blue_mask}.
+	 */
+	class XImage extends Structure {
+		public int width, height;
+		public int xoffset;
+		public int format;
+		public Pointer data;
+		public int byte_order;
+		public int bitmap_unit;
+		public int bitmap_bit_order;
+		public int bitmap_pad;
+		public int depth;
+		public int bytes_per_line;
+		public int bits_per_pixel;
+		public com.sun.jna.NativeLong red_mask;
+		public com.sun.jna.NativeLong green_mask;
+		public com.sun.jna.NativeLong blue_mask;
+		public Pointer obdata;
+		// struct funcs { create_image, destroy_image, get_pixel, put_pixel, sub_image, add_pixel } — flattened.
+		public Pointer f_create_image;
+		public Pointer f_destroy_image;
+		public Pointer f_get_pixel;
+		public Pointer f_put_pixel;
+		public Pointer f_sub_image;
+		public Pointer f_add_pixel;
+
+		@Override
+		protected List<String> getFieldOrder() {
+			return Arrays.asList("width", "height", "xoffset", "format", "data", "byte_order", "bitmap_unit",
+				"bitmap_bit_order", "bitmap_pad", "depth", "bytes_per_line", "bits_per_pixel",
+				"red_mask", "green_mask", "blue_mask", "obdata",
+				"f_create_image", "f_destroy_image", "f_get_pixel", "f_put_pixel", "f_sub_image", "f_add_pixel");
+		}
+
+		/** Frees this image (data + struct) via its own {@code destroy_image} routine; best-effort. */
+		public void destroyImage() {
+			try {
+				if (f_destroy_image != null) {
+					com.sun.jna.Function.getFunction(f_destroy_image).invokeInt(new Object[]{getPointer()});
+				}
+			} catch (Throwable ignored) {
+				// Fall back to freeing the data buffer at least; leaking the small struct is preferable to a crash.
+				try { if (data != null) INSTANCE.XFree(data); } catch (Throwable ignored2) {}
+			}
 		}
 	}
 

@@ -8,6 +8,21 @@ Format: newest first. Each dated entry has a **Done** list and, when relevant, *
 
 ---
 
+## 2026-07-08 — Window capture via XGetImage (portal/prompt-free on Wayland)
+
+**Done**
+- `LinuxController.captureWindow` no longer uses AWT `Robot`. On Wayland every `Robot` grab tunnels through
+  xdg-desktop-portal → a screen-share prompt per grab and then a `SecurityException`. It now reads the
+  window's pixmap directly with `X11.XGetImage(display, window, 0,0,w,h, AllPlanes, ZPixmap)` — no portal, no
+  prompt — for X11/XWayland windows (the only ones enumerable anyway). This also fixes the SDK's
+  `Window.capture()` (bots' window vision) on Wayland, not just Studio's preview.
+- Re-added the `XGetImage` binding + a minimal `XImage` Structure to `X11.java` (the file's note said these
+  were "removed since we use Robot"). Frees the image via its own `f.destroy_image` function pointer
+  (`Function.getFunction(...)` — what the `XDestroyImage` macro expands to). ZPixmap decoded to
+  `TYPE_INT_ARGB` via the image's red/green/blue masks.
+- Contract unchanged: `captureWindow` still returns `null` on any failure so callers keep their full-desktop
+  fallback.
+
 ## 2026-07-08 — Telemetry wire v2: per-event source line
 
 **Done**
