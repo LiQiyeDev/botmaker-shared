@@ -8,6 +8,24 @@ Format: newest first. Each dated entry has a **Done** list and, when relevant, *
 
 ---
 
+## 2026-07-08 — Minimized-window restore, X error silencer, telemetry resilience
+
+**Done**
+- `NativeController` gained two additive (defaulted) methods: `getAllWindows(boolean includeMinimized)` (Linux
+  includes unmapped/minimized client windows when requested) and `restoreWindow(GenericWindow)`. Linux maps +
+  raises + focuses the window (`XMapWindow` binding added — de-iconifies per ICCCM 4.1.4); Windows uses
+  `ShowWindow(SW_RESTORE)`. Lets a consumer un-minimize a target so its pixels become capturable.
+- `LinuxController.captureWindow` now re-checks `isWindowViewable` right before `XGetImage`, so a window
+  minimized between enumeration and capture returns `null` cleanly instead of provoking an Xlib `BadMatch`.
+- `X11ErrorSilencer.install()` + `X11.XSetErrorHandler` binding: installs a no-op Xlib error handler to swallow
+  benign non-fatal protocol errors. Must be installed **before** the JavaFX GTK backend (Studio's
+  `BotMakerStudio.main`) or GDK warns "XSetErrorHandler() called with a GDK error trap pushed".
+- **Telemetry resilience.** `TelemetryFrame.read` now distinguishes a recoverable payload-decode failure
+  (`FrameFormatException` — e.g. an old-SDK wire-version skew; framing stays aligned) from a fatal stream error.
+  `TelemetryServer` skips a bad frame (reporting the reason once via a new optional `onError` sink) and
+  re-accepts across client reconnects instead of dying on the first hiccup. `TelemetryClient` retries a dropped
+  socket a bounded number of times (5 × 250ms) rather than permanently disabling on the first `IOException`.
+
 ## 2026-07-08 — Window capture via XGetImage (portal/prompt-free on Wayland)
 
 **Done**

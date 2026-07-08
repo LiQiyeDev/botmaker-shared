@@ -1,5 +1,6 @@
 package com.botmaker.shared.capture.linux;
 
+import com.sun.jna.Callback;
 import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
@@ -118,6 +119,19 @@ public interface X11 extends Library {
 	int XResizeWindow(Pointer display, Pointer window, int width, int height);
 	int XMoveResizeWindow(Pointer display, Pointer window, int x, int y, int width, int height);
 	int XRaiseWindow(Pointer display, Pointer window);
+	// Map (show) a window. On a top-level window that is iconified/minimized this de-iconifies it per
+	// ICCCM 4.1.4 — the WM restores it to Normal state — so its pixels become readable by XGetImage again.
+	int XMapWindow(Pointer display, Pointer window);
+
+	// Install a process-wide Xlib error handler; returns the previous one. The default Xlib handler prints
+	// non-fatal protocol errors (BadMatch/BadWindow/BadDrawable — e.g. XGetImage racing a window unmap) to
+	// stderr; a no-op handler swallows that benign noise. See X11ErrorSilencer.
+	Pointer XSetErrorHandler(XErrorHandler handler);
+
+	/** Callback matching Xlib's {@code int (*)(Display*, XErrorEvent*)}. Args ignored when silencing. */
+	interface XErrorHandler extends Callback {
+		int invoke(Pointer display, Pointer errorEvent);
+	}
 
 	// Keyboard: map an X keysym to a physical keycode for XTest injection
 	byte XKeysymToKeycode(Pointer display, long keysym);

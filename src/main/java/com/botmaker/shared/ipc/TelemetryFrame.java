@@ -71,7 +71,24 @@ public final class TelemetryFrame {
         out.flush();
     }
 
-    /** Reads and decodes one framed event. Throws {@link EOFException} at a clean stream end. */
+    /**
+     * A frame whose length prefix read fine but whose <em>payload</em> couldn't be decoded — e.g. a frame
+     * from an older-SDK bot speaking a different {@link #PROTOCOL_VERSION}, or an unknown type tag. Because
+     * the full payload was already consumed from the stream, the connection stays byte-aligned: a reader can
+     * skip this one frame and keep going rather than tearing down the whole channel. Distinct from a plain
+     * {@link IOException}/{@link EOFException} out of {@link #read}, which means the stream itself is gone.
+     */
+    public static final class FrameFormatException extends IOException {
+        public FrameFormatException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Reads and decodes one framed event. Throws {@link EOFException}/{@link IOException} at a clean stream
+     * end or a corrupt length prefix (fatal — the stream is gone/desynced), or {@link FrameFormatException}
+     * when only the payload is undecodable (recoverable — framing is still aligned to the next frame).
+     */
     public static TelemetryEvent read(DataInputStream in) throws IOException {
         int length = in.readInt();
         if (length < 0 || length > MAX_FRAME_BYTES) {
@@ -80,21 +97,27 @@ public final class TelemetryFrame {
         byte[] payload = in.readNBytes(length);
         if (payload.length < length) throw new EOFException("Truncated telemetry frame");
 
-        DataInputStream p = new DataInputStream(new ByteArrayInputStream(payload));
-        int version = p.readUnsignedByte();
-        if (version != PROTOCOL_VERSION) {
-            throw new IOException("Unsupported telemetry protocol version: " + version);
+        // The socket stream is now aligned to the next frame; decode the in-memory payload. Any failure here
+        // (version skew, unknown tag, short payload) is recoverable — surface it as FrameFormatException.
+        try {
+            DataInputStream p = new DataInputStream(new ByteArrayInputStream(payload));
+            int version = p.readUnsignedByte();
+            if (version != PROTOCOL_VERSION) {
+                throw new IOException("Unsupported telemetry protocol version: " + version);
+            }
+            int type = p.readUnsignedByte();
+            return switch (type) {
+                case TYPE_MATCH -> new TelemetryEvent.Match(
+                        readTarget(p), readNullableRect(p), readNullableRect(p), p.readDouble(), p.readBoolean(), p.readInt());
+                case TYPE_CLICK -> new TelemetryEvent.Click(
+                        readTarget(p), p.readInt(), p.readInt(), p.readInt(), p.readInt());
+                case TYPE_REGION -> new TelemetryEvent.Region(
+                        readTarget(p), readNullableRect(p), p.readInt());
+                default -> throw new IOException("Unknown telemetry type tag: " + type);
+            };
+        } catch (IOException decodeError) {
+            throw new FrameFormatException(decodeError.getMessage());
         }
-        int type = p.readUnsignedByte();
-        return switch (type) {
-            case TYPE_MATCH -> new TelemetryEvent.Match(
-                    readTarget(p), readNullableRect(p), readNullableRect(p), p.readDouble(), p.readBoolean(), p.readInt());
-            case TYPE_CLICK -> new TelemetryEvent.Click(
-                    readTarget(p), p.readInt(), p.readInt(), p.readInt(), p.readInt());
-            case TYPE_REGION -> new TelemetryEvent.Region(
-                    readTarget(p), readNullableRect(p), p.readInt());
-            default -> throw new IOException("Unknown telemetry type tag: " + type);
-        };
     }
 
     private static void writeTarget(DataOutputStream p, TelemetryEvent.Target t) throws IOException {

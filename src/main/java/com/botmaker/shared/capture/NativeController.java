@@ -16,6 +16,23 @@ public interface NativeController {
 	List<GenericWindow> getChildWindows(GenericWindow parent);
 	List<GenericWindow> getAllWindows();
 
+	/**
+	 * Enumerate windows, optionally including currently-minimized (unmapped) ones — which {@link #getAllWindows()}
+	 * omits because their pixels aren't directly capturable. Callers use this to locate a minimized target and
+	 * {@link #restoreWindow(GenericWindow) restore} it. Default: same as {@link #getAllWindows()} (additive).
+	 */
+	default List<GenericWindow> getAllWindows(boolean includeMinimized) {
+		return getAllWindows();
+	}
+
+	/**
+	 * Un-minimize / restore {@code window} so it becomes visible and its pixels capturable again. Intrusive by
+	 * nature (the window returns to the foreground), mirroring the platform's normal restore. Default no-op so
+	 * this stays additive for existing implementations.
+	 */
+	default void restoreWindow(GenericWindow window) {
+	}
+
 	/** Capture just this window's pixels, or {@code null} if a usable frame can't be produced. */
 	BufferedImage captureWindow(GenericWindow window);
 

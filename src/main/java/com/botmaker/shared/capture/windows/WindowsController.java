@@ -56,6 +56,14 @@ public class WindowsController implements NativeController {
 	}
 
 	@Override
+	public void restoreWindow(GenericWindow window) {
+		if (window == null) return;
+		HWND hwnd = (HWND) window.getNativeHandle();
+		User32.INSTANCE.ShowWindow(hwnd, User32.SW_RESTORE);
+		User32.INSTANCE.SetForegroundWindow(hwnd);
+	}
+
+	@Override
 	public void moveWindow(GenericWindow window, int x, int y) {
 		HWND hwnd = (HWND) window.getNativeHandle();
 		User32.INSTANCE.SetWindowPos(hwnd, null, x, y, 0, 0,

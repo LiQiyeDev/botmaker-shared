@@ -201,6 +201,11 @@ public class LinuxController implements NativeController, AutoCloseable {
 
 	@Override
 	public List<GenericWindow> getAllWindows() {
+		return getAllWindows(false);
+	}
+
+	@Override
+	public List<GenericWindow> getAllWindows(boolean includeMinimized) {
 		checkNotClosed();
 
 		List<GenericWindow> result = new ArrayList<>();
@@ -220,7 +225,9 @@ public class LinuxController implements NativeController, AutoCloseable {
 			}
 
 			for (Pointer window : windows) {
-				if (X11Utils.isWindowViewable(display, window) &&
+				// Minimized windows are unmapped (not viewable) so their pixels can't be captured; include
+				// them only when the caller intends to restore them first.
+				if ((includeMinimized || X11Utils.isWindowViewable(display, window)) &&
 					!X11Utils.hasOverrideRedirect(display, window)) {
 
 					String title = X11Utils.getWindowTitle(display, window);
@@ -238,6 +245,27 @@ public class LinuxController implements NativeController, AutoCloseable {
 		}
 
 		return result;
+	}
+
+	/**
+	 * De-iconify a minimized window: {@code XMapWindow} restores it to Normal state (ICCCM 4.1.4), then we
+	 * raise + focus it. After this the window is viewable and {@link #captureWindow} can read its pixels.
+	 */
+	@Override
+	public void restoreWindow(GenericWindow window) {
+		checkNotClosed();
+		if (!x11Available || window == null) {
+			return;
+		}
+		try {
+			Pointer x11Window = (Pointer) window.getNativeHandle();
+			X11.INSTANCE.XMapWindow(display, x11Window);
+			X11.INSTANCE.XRaiseWindow(display, x11Window);
+			X11.INSTANCE.XSetInputFocus(display, x11Window, X11.RevertToParent, 0);
+			X11.INSTANCE.XFlush(display);
+		} catch (Exception e) {
+			System.err.println("[Linux] Error restoring window: " + e.getMessage());
+		}
 	}
 
 	/**
@@ -304,6 +332,14 @@ public class LinuxController implements NativeController, AutoCloseable {
 		X11.XImage image = null;
 		try {
 			Pointer x11Window = (Pointer) window.getNativeHandle();
+
+			// Bail if the window isn't viewable (e.g. it was minimized/unmapped since it was enumerated):
+			// XGetImage on an unmapped drawable raises a BadMatch that Xlib's default handler prints to
+			// stderr. This cheap re-check avoids generating that error at the source. Callers that want a
+			// minimized window shown must restoreWindow(...) first.
+			if (!X11Utils.isWindowViewable(display, x11Window)) {
+				return null;
+			}
 
 			// Geometry gives us the window's size; XGetImage reads from the window's own (0,0) origin.
 			Rectangle rect = X11Utils.getWindowGeometry(display, x11Window);
