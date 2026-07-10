@@ -9,11 +9,11 @@ captures, focuses, moves, resizes and drives input to native OS windows. It depe
 
 ## Contract stability
 
-Because shared is consumed by two independent modules, **its public API is a shared contract** — the
-`NativeController` interface and the `capture.*` value types (`GenericWindow`, `WindowInfo`) are compiled
-against by both the SDK and the Studio. Treat signature changes as breaking for two downstream repos, not
-one; land the shared change, release it, then bump both consumers (see the umbrella `../CLAUDE.md` and
-`../release.sh`).
+shared is consumed by two modules (SDK + Studio) via the `NativeController` interface and the `capture.*`
+value types (`GenericWindow`, `WindowInfo`). **No published bot/project consumes them yet, so this API is
+currently freely breakable** — change signatures when it makes the contract cleaner. The only cost is the
+ordered cross-module release: land the shared change, release it, then bump both consumers (see the umbrella
+`../CLAUDE.md` and `../release.sh`). Reinstate stability discipline once real bots ship.
 
 ## Planning
 
@@ -26,14 +26,14 @@ entry under the newest-first history.
 ```bash
 mvn compile        # Build
 mvn test           # Run tests (JUnit Jupiter; NativeControllerFactory.setForTesting injects a fake)
-mvn install        # Install to the local Maven repo (also done by the umbrella reactor)
-./dev-install.sh   # Install to ~/.m2 at 0.0.0-SNAPSHOT so consumers pick up local changes with no tag
+mvn install        # Install to ~/.m2 at 0.0.0-SNAPSHOT so consumers pick up local changes with no tag
 ```
 
 This module is normally built from the umbrella root (`mvn install`), which builds it **first** so the SDK
 and Studio resolve it from the reactor. There is no coordinate trick to test local changes: because the
-groupId already matches JitPack, `./dev-install.sh` (a plain `mvn install`) lands it at the default
-`0.0.0-SNAPSHOT` every consumer resolves. See `../CLAUDE.md` › Local dev.
+groupId already matches JitPack, a plain `mvn install` (or `mvn -pl botmaker-shared -am install` from the
+umbrella) lands it at the default `0.0.0-SNAPSHOT` every consumer resolves. The old `dev-install.sh` was
+removed — it was just that `mvn install`. See `../CLAUDE.md` › Local dev.
 
 ## Architecture
 

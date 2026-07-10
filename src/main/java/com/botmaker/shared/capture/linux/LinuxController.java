@@ -348,8 +348,14 @@ public class LinuxController implements NativeController, AutoCloseable {
 				return null;
 			}
 
-			image = X11.INSTANCE.XGetImage(display, x11Window, 0, 0, rect.width, rect.height,
-					new com.sun.jna.NativeLong(X11.AllPlanes), X11.ZPixmap);
+			// Prefer the window's off-screen pixmap (via XComposite) so regions occluded by windows in
+			// front are captured too; fall back to the on-screen window drawable when no compositor is
+			// running or the extension is unavailable (there, occluded pixels simply read as black).
+			image = captureViaComposite(x11Window, rect);
+			if (image == null) {
+				image = X11.INSTANCE.XGetImage(display, x11Window, 0, 0, rect.width, rect.height,
+						new com.sun.jna.NativeLong(X11.AllPlanes), X11.ZPixmap);
+			}
 			if (image == null || image.data == null || image.bits_per_pixel < 24) {
 				return null;
 			}
@@ -360,6 +366,54 @@ public class LinuxController implements NativeController, AutoCloseable {
 			return null;
 		} finally {
 			if (image != null) image.destroyImage();
+		}
+	}
+
+	/**
+	 * Captures {@code x11Window} from its off-screen backing pixmap via XComposite, so pixels covered by
+	 * windows in front are still read (unlike an on-window {@code XGetImage}, which returns black there).
+	 * Returns {@code null} — so the caller falls back to the on-window path — when libXcomposite is missing,
+	 * no compositor is running, or the pixmap can't be named/read.
+	 */
+	private X11.XImage captureViaComposite(Pointer x11Window, Rectangle rect) {
+		XComposite xc = XComposite.instance();
+		if (xc == null || !compositorActive()) {
+			return null;
+		}
+		try {
+			if (!xc.XCompositeQueryExtension(display, new IntByReference(), new IntByReference())) {
+				return null;
+			}
+			Pointer pixmap = xc.XCompositeNameWindowPixmap(display, x11Window);
+			if (pixmap == null || Pointer.nativeValue(pixmap) == 0) {
+				return null;
+			}
+			try {
+				return X11.INSTANCE.XGetImage(display, pixmap, 0, 0, rect.width, rect.height,
+						new com.sun.jna.NativeLong(X11.AllPlanes), X11.ZPixmap);
+			} finally {
+				X11.INSTANCE.XFreePixmap(display, pixmap);
+			}
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
+	/**
+	 * Whether a compositing manager owns the {@code _NET_WM_CM_S<screen>} selection. Only when one is running
+	 * does a top-level window have a redirected off-screen pixmap for {@link #captureViaComposite} to read.
+	 */
+	private boolean compositorActive() {
+		try {
+			int screen = X11.INSTANCE.XDefaultScreen(display);
+			Pointer atom = X11.INSTANCE.XInternAtom(display, "_NET_WM_CM_S" + screen, false);
+			if (atom == null) {
+				return false;
+			}
+			Pointer owner = X11.INSTANCE.XGetSelectionOwner(display, atom);
+			return owner != null && Pointer.nativeValue(owner) != 0;
+		} catch (Throwable t) {
+			return false;
 		}
 	}
 

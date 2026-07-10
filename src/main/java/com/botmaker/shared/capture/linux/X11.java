@@ -140,6 +140,13 @@ public interface X11 extends Library {
 	Pointer XInternAtom(Pointer display, String atomName, boolean onlyIfExists);
 	int XGetAtomName(Pointer display, Pointer atom, PointerByReference nameReturn);
 
+	// Selections — used to detect a running compositor via the _NET_WM_CM_S<screen> selection owner.
+	// Returns the owning window (XID as Pointer), or null (None) when the selection is unowned.
+	Pointer XGetSelectionOwner(Pointer display, Pointer selectionAtom);
+
+	// Frees a Pixmap XID (e.g. the one named by XCompositeNameWindowPixmap for occlusion-safe capture).
+	int XFreePixmap(Pointer display, Pointer pixmap);
+
 	// Screen info
 	int XScreenCount(Pointer display);
 	int XDisplayWidth(Pointer display, int screenNumber);

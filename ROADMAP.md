@@ -8,6 +8,18 @@ Format: newest first. Each dated entry has a **Done** list and, when relevant, *
 
 ---
 
+## 2026-07-10 — Occlusion-safe window capture (XComposite off-screen pixmap)
+
+**Done**
+- `LinuxController.captureWindow` no longer returns a **black rectangle** where another window overlaps the
+  target. It now prefers the window's off-screen backing pixmap via XComposite (`XCompositeNameWindowPixmap`
+  → `XGetImage` on the pixmap → `XFreePixmap`), which contains the whole window regardless of what's in
+  front. Falls back to the previous on-window `XGetImage` when no compositor is running or the extension is
+  unavailable (there, occluded pixels still read black, as before). Gated on a real compositor via the
+  `_NET_WM_CM_S<screen>` selection owner (new helpers `captureViaComposite` / `compositorActive`).
+- New JNA bindings: `XComposite` (libXcomposite, loaded defensively — `null` when absent) and
+  `X11.XGetSelectionOwner` / `X11.XFreePixmap`.
+
 ## 2026-07-08 — Minimized-window restore, X error silencer, telemetry resilience
 
 **Done**
