@@ -229,4 +229,32 @@ public class X11Utils {
 		int result = X11.INSTANCE.XGetWindowAttributes(display, window, attrs);
 		return result != 0 && attrs.override_redirect;
 	}
+
+	/**
+	 * Set {@code _NET_WM_BYPASS_COMPOSITOR = 2} on {@code window}: EWMH "the compositor should never
+	 * unredirect this window". On X11 KDE, a fullscreen OpenGL game (e.g. a Proton/Wine title) otherwise
+	 * makes KWin suspend compositing, which destroys every window's off-screen backing pixmap — so
+	 * {@code captureViaComposite} reads black for the game <em>and</em> every other window. Marking the
+	 * target with value 2 keeps KWin compositing it, so its pixmap stays readable. Best-effort: swallows
+	 * errors (harmless when no compositor honors the hint). Idempotent — safe to call before every capture.
+	 */
+	public static void setKeepComposited(Pointer display, Pointer window) {
+		if (window == null || Pointer.nativeValue(window) == 0) {
+			return;
+		}
+		try {
+			Pointer prop = X11.INSTANCE.XInternAtom(display, "_NET_WM_BYPASS_COMPOSITOR", false);
+			if (prop == null || Pointer.nativeValue(prop) == 0) {
+				return;
+			}
+			// format 32 => the data buffer is an array of C long (8 bytes each on 64-bit); one CARDINAL = 2.
+			com.sun.jna.Memory data = new com.sun.jna.Memory(com.sun.jna.Native.LONG_SIZE);
+			data.setNativeLong(0, new com.sun.jna.NativeLong(2));
+			X11.INSTANCE.XChangeProperty(display, window, prop, new Pointer(X11.XA_CARDINAL), 32,
+				X11.PropModeReplace, data, 1);
+			X11.INSTANCE.XFlush(display);
+		} catch (Throwable ignored) {
+			// Best-effort hint; capture still proceeds (and falls back) without it.
+		}
+	}
 }

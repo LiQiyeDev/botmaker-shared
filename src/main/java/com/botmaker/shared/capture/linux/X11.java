@@ -30,6 +30,11 @@ public interface X11 extends Library {
 	int InputFocus = 1;
 	int RevertToParent = 2;
 
+	// XChangeProperty mode + the predefined CARDINAL atom (X.h / Xatom.h). Predefined atoms are small fixed
+	// XIDs, so XA_CARDINAL is passed as {@code new Pointer(6)} rather than being interned.
+	int PropModeReplace = 0;
+	int XA_CARDINAL = 6;
+
 	// XGetImage: image formats (Xlib.h) and the "all planes" mask.
 	int XYBitmap = 0;
 	int XYPixmap = 1;
@@ -139,6 +144,12 @@ public interface X11 extends Library {
 	// Atoms
 	Pointer XInternAtom(Pointer display, String atomName, boolean onlyIfExists);
 	int XGetAtomName(Pointer display, Pointer atom, PointerByReference nameReturn);
+
+	// Write a window property. For format 32 the data buffer is an array of C {@code long} (8 bytes each on
+	// 64-bit), not int32. Used to set _NET_WM_BYPASS_COMPOSITOR=2 so KWin never unredirects the target
+	// (keeps it composited, so its off-screen pixmap stays readable — see X11Utils.setKeepComposited).
+	int XChangeProperty(Pointer display, Pointer window, Pointer property, Pointer type, int format,
+						int mode, Pointer data, int nElements);
 
 	// Selections — used to detect a running compositor via the _NET_WM_CM_S<screen> selection owner.
 	// Returns the owning window (XID as Pointer), or null (None) when the selection is unowned.

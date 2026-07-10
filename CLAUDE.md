@@ -44,6 +44,12 @@ own full-desktop fallback), window management (`focus`/`move`/`resize`), and inp
 (`keyDown`/`keyUp`/`typeText`/`mouseMove`/`mouseButton`/`scroll`, plus `postLeftClick*`). There is
 **deliberately no `captureDesktop()`** here — full-desktop capture lives in each consumer.
 
+On X11 KDE, `LinuxController.captureWindow` sets `_NET_WM_BYPASS_COMPOSITOR=2` on the target so KWin doesn't
+unredirect a fullscreen game (which would black out its — and every other window's — off-screen pixmap), then
+prefers the XComposite pixmap, and falls back to a root-window crop if the frame reads all-black. See the
+2026-07-10 `ROADMAP.md` entry (and the deferred portal/PipeWire path) for the full rationale and the manual
+KWin `WindowsBlockCompositing=false` / borderless-windowed workaround for true exclusive-fullscreen games.
+
 `capture.NativeControllerFactory.get()` picks the implementation by OS (JNA `Platform`): `WindowsController`
 or `LinuxController` (macOS throws `UnsupportedOperationException`). `setForTesting(...)` injects a fake for
 tests. Key codes crossing the interface are **per-OS native codes** (X keysym on Linux, virtual-key code on

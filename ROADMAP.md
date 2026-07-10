@@ -8,6 +8,32 @@ Format: newest first. Each dated entry has a **Done** list and, when relevant, *
 
 ---
 
+`## 2026-07-10 — Fullscreen-game capture: keep KWin compositing + root-crop fallback
+`
+**Done**
+- Fixed the **black capture** of a fullscreen game (repro: Firestone, a Unity/Proton title on X11 KDE) that
+  *also* blacked out every other window's capture the moment it launched. Root cause: KWin **unredirects**
+  (globally suspends compositing for) a fullscreen window, destroying the off-screen backing pixmaps that
+  `captureViaComposite` reads — so the game and every other window read black.
+- `LinuxController.captureWindow` now:
+  1. sets **`_NET_WM_BYPASS_COMPOSITOR = 2`** on the target (`X11Utils.setKeepComposited`, new
+     `X11.XChangeProperty` binding) — EWMH "never unredirect this window", so KWin keeps compositing it and
+     the pixmap stays readable (works because a Proton/OpenGL window renders to a normal X11 drawable);
+  2. detects an **all-black** frame (`isAllBlack`, sparse-grid sample) and falls back to a **root-window
+     crop** (`XGetImage` on the root at the window's absolute rect — `getWindowGeometry` already returns
+     absolute coords) which reads the on-screen framebuffer; then the previous on-window `XGetImage` as a
+     last resort. Root-crop runs only *after* the occlusion-safe composite path, so overlapping-window
+     capture is unaffected.
+- Manual belt-and-suspenders if a game still blacks out (true exclusive-fullscreen / direct scanout): disable
+  KWin ▸ *Allow applications to block compositing*
+  (`kwriteconfig6 --file kwinrc --group Compositing --key WindowsBlockCompositing false` then reconfigure)
+  and/or run the game **borderless-windowed** rather than exclusive fullscreen.
+
+**Deferred / next**
+- A compositor-agnostic **xdg-desktop-portal ScreenCast / PipeWire** capture backend would read KWin's
+  scanout regardless of unredirect (robust for true direct-scanout games). The `kde.portal` backend is
+  installed; deferred until the property fix proves insufficient for some title.
+
 ## 2026-07-10 — Occlusion-safe window capture (XComposite off-screen pixmap)
 
 **Done**

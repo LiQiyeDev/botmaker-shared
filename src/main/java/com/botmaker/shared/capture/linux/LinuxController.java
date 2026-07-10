@@ -341,25 +341,44 @@ public class LinuxController implements NativeController, AutoCloseable {
 				return null;
 			}
 
-			// Geometry gives us the window's size; XGetImage reads from the window's own (0,0) origin.
+			// Geometry gives us the window's size and absolute screen position (via XTranslateCoordinates).
 			Rectangle rect = X11Utils.getWindowGeometry(display, x11Window);
 			if (rect == null || rect.width <= 0 || rect.height <= 0) {
 				System.err.println("[Linux] Invalid window geometry, cannot capture window.");
 				return null;
 			}
 
+			// Ask KWin to keep this window composited (EWMH _NET_WM_BYPASS_COMPOSITOR=2). A fullscreen
+			// Proton/OpenGL game otherwise triggers unredirect, blacking out every window's backing pixmap.
+			X11Utils.setKeepComposited(display, x11Window);
+
 			// Prefer the window's off-screen pixmap (via XComposite) so regions occluded by windows in
-			// front are captured too; fall back to the on-screen window drawable when no compositor is
-			// running or the extension is unavailable (there, occluded pixels simply read as black).
+			// front are captured too.
 			image = captureViaComposite(x11Window, rect);
-			if (image == null) {
+			BufferedImage result = decode(image);
+			if (image != null) { image.destroyImage(); image = null; }
+
+			// If the composite read is unavailable or came back all-black (compositor unredirected /
+			// mid-transition), fall back to reading the on-screen framebuffer at the window's absolute
+			// rect. This loses occluded pixels but recovers real content for a fullscreen game.
+			if (result == null || isAllBlack(result)) {
+				image = X11.INSTANCE.XGetImage(display, X11.INSTANCE.XDefaultRootWindow(display),
+						rect.x, rect.y, rect.width, rect.height,
+						new com.sun.jna.NativeLong(X11.AllPlanes), X11.ZPixmap);
+				BufferedImage rootCrop = decode(image);
+				if (image != null) { image.destroyImage(); image = null; }
+				if (rootCrop != null && !isAllBlack(rootCrop)) {
+					return rootCrop;
+				}
+				if (result != null) {
+					return result; // both black — return the composite frame rather than nothing
+				}
+				// Last resort: the on-window drawable (occluded regions read black, but un-occluded pixels work).
 				image = X11.INSTANCE.XGetImage(display, x11Window, 0, 0, rect.width, rect.height,
 						new com.sun.jna.NativeLong(X11.AllPlanes), X11.ZPixmap);
+				return decode(image);
 			}
-			if (image == null || image.data == null || image.bits_per_pixel < 24) {
-				return null;
-			}
-			return toBufferedImage(image);
+			return result;
 
 		} catch (Throwable e) {
 			System.err.println("[Linux] Error capturing window: " + e.getMessage());
@@ -415,6 +434,34 @@ public class LinuxController implements NativeController, AutoCloseable {
 		} catch (Throwable t) {
 			return false;
 		}
+	}
+
+	/** Null/validity-guards an {@link X11.XImage} then decodes it; returns {@code null} for an unusable frame. */
+	private static BufferedImage decode(X11.XImage image) {
+		if (image == null || image.data == null || image.bits_per_pixel < 24) {
+			return null;
+		}
+		return toBufferedImage(image);
+	}
+
+	/**
+	 * True if every sampled pixel is pure black — the signature of a capture read while the compositor had
+	 * the window unredirected. Samples a sparse grid (≈every 17th pixel per axis) so it's cheap on large
+	 * frames; a single non-black sample short-circuits to false.
+	 */
+	static boolean isAllBlack(BufferedImage img) {
+		if (img == null) {
+			return true;
+		}
+		int step = Math.max(1, Math.min(img.getWidth(), img.getHeight()) / 17);
+		for (int y = 0; y < img.getHeight(); y += step) {
+			for (int x = 0; x < img.getWidth(); x += step) {
+				if ((img.getRGB(x, y) & 0x00FFFFFF) != 0) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	/**
